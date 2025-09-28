@@ -5,7 +5,7 @@ use ratatui::{
     style::{Color, Style, Modifier},
     symbols,
     text::{Span},
-    prelude::{Position},
+    prelude::{Position, Alignment},
     widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph},
     DefaultTerminal, Frame,
 };
@@ -62,6 +62,13 @@ struct DataSeries {
 }
 
 impl DataSeries {
+    fn new() -> Self {
+        Self {
+            name: "Graph".to_string(),
+            data: vec![(0.0, 0.0)],
+            ..Default::default()
+        }
+    }
     fn get_bounds(&self) -> (f64, f64) {
         if self.data.is_empty() {
             return (1.0, 1.0)
@@ -99,7 +106,7 @@ impl App {
     fn new() -> Self {
         Self {
             mode: ViewMode::Graph,
-            data_series: vec![DataSeries::default()],
+            data_series: vec![DataSeries::new()],
             selected_serie: 0,
             ..Default::default()
         }
@@ -135,7 +142,7 @@ impl App {
 
         // Instructions
         let instructions = Paragraph::new("Press 'i' to insert data, <TAB> to cycle between x and y, 'q' to quit")
-            .block(Block::bordered());
+            .block(Block::bordered().title(" Instructions "));
         frame.render_widget(instructions, chunks[2]);
     }
 
@@ -151,24 +158,24 @@ impl App {
             (InputMode::Insert, InputField::X) => Style::default().fg(Color::Yellow),
             _ => Style::default(),
         };
-        self.draw_input_box(frame, input_chunks[0], format!("X: {}", self.input_x), x_style);
+        self.draw_input_box(frame, input_chunks[0], self.input_x.clone(), format!(" X "), x_style);
 
         // Y
         let y_style = match (&self.input_mode, &self.input_field) {
             (InputMode::Insert, InputField::Y) => Style::default().fg(Color::Yellow),
             _ => Style::default(),
         };
-        self.draw_input_box(frame, input_chunks[1], format!("Y: {}", self.input_y), y_style);
+        self.draw_input_box(frame, input_chunks[1], self.input_y.clone(), format!(" Y "), y_style);
 
         // Status
         let status = Paragraph::new(self.status_msg.clone())
-            .block(Block::bordered());
+            .block(Block::bordered().title(" Status "));
         frame.render_widget(status, input_chunks[2]);
     }
 
-    fn draw_input_box(&mut self, frame: &mut Frame, area: Rect, content: String, style: Style) {
+    fn draw_input_box(&mut self, frame: &mut Frame, area: Rect, content: String, title: String, style: Style) {
         let input_box = Paragraph::new(content)
-            .block(Block::bordered())
+            .block(Block::bordered().title(title))
             .style(style);
             
         frame.render_widget(input_box, area);
@@ -179,7 +186,7 @@ impl App {
         let dataset = Dataset::default()
             .name("")
             .marker(symbols::Marker::Braille)
-            .graph_type(GraphType::Scatter)
+            .graph_type(GraphType::Line)
             .style(Style::default().fg(Color::Cyan))
             .data(&serie.data);
 
@@ -187,7 +194,9 @@ impl App {
         let (x_labels, y_labels) = serie.get_labels();
 
         let chart = Chart::new(vec![dataset])
-            .block(Block::bordered().title(serie.name.clone()))
+            .block(Block::bordered()
+                .title(format!(" {} ", serie.name))
+                .title_alignment(Alignment::Center))
             .x_axis(Axis::default()
                 .title("X")
                 .bounds([0.0, x_max])
