@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::Error;
+use csv::Reader;
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
@@ -5,7 +8,7 @@ use ratatui::{
     style::{Color, Style, Modifier},
     symbols,
     text::{Span},
-    prelude::{Position, Alignment},
+    prelude::{Alignment},
     widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph},
     DefaultTerminal, Frame,
 };
@@ -18,7 +21,7 @@ fn main() -> Result<()> {
     result
 }
 
-#[derive(Default)]
+#[derive(Default)]#[allow(dead_code)]
 enum ViewMode {
     #[default]
     Graph,
@@ -65,10 +68,10 @@ impl DataSeries {
     fn new() -> Self {
         Self {
             name: "Graph".to_string(),
-            data: vec![(0.0, 0.0)],
             ..Default::default()
         }
     }
+
     fn get_bounds(&self) -> (f64, f64) {
         if self.data.is_empty() {
             return (1.0, 1.0)
@@ -83,7 +86,7 @@ impl DataSeries {
         (x_max, y_max)
     }
 
-    fn get_labels(&self) -> (Vec<Span>, Vec<Span>) {
+    fn get_labels(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
         let mut x_labels = Vec::new();
         let mut y_labels = Vec::new();
         let (x_max, y_max) = self.get_bounds();
@@ -106,10 +109,29 @@ impl App {
     fn new() -> Self {
         Self {
             mode: ViewMode::Graph,
-            data_series: vec![DataSeries::new()],
+            data_series: self.read_csv("data.csv"),
             selected_serie: 0,
             ..Default::default()
         }
+    }
+
+    fn read_csv(&mut self, path: String) -> Result<(), Box<dyn, Error>> {
+        let file = File::open(path);
+        let mut rdr = Reader::from_reader(file);
+
+        for result in rdr.records() {
+            let record = result?;
+
+            let mut serie = DataSeries::new();
+            serie.name = &record[0];
+            for i in (1..record.len()).step_by(2) {
+                serie.data.push((&record[i], &record[i+1]))
+            }
+
+            self.data_series.push(serie);
+        }
+
+        Ok(())
     }
 
     fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -148,8 +170,8 @@ impl App {
 
     fn draw_input_bar(&mut self, frame: &mut Frame, area: Rect) {
         let input_chunks = Layout::horizontal([
-            Constraint::Length(10), // X
-            Constraint::Length(10), // Y
+            Constraint::Length(8), // X
+            Constraint::Length(8), // Y
             Constraint::Min(20), // Status
         ]).split(area);
 
