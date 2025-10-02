@@ -90,15 +90,15 @@ impl DataSeries {
         let mut x_labels = Vec::new();
         let mut y_labels = Vec::new();
         let (x_max, y_max) = self.get_bounds();
-        let n_labels = std::cmp::min(10, self.data.len());
+        let n_labels = std::cmp::min(5, self.data.len());
 
         if n_labels == 0 {
             return (vec![], vec![]);
         }
 
         for i in 0..=n_labels {
-            x_labels.push(Span::styled(format!("{:.1}", i as f64 / n_labels as f64 * x_max), Style::default().add_modifier(Modifier::BOLD)));
-            y_labels.push(Span::styled(format!("{:.1}", i as f64 / n_labels as f64 * y_max), Style::default().add_modifier(Modifier::BOLD)));
+            x_labels.push(Span::styled(format!("{:.2}", i as f64 / n_labels as f64 * x_max), Style::default().add_modifier(Modifier::BOLD)));
+            y_labels.push(Span::styled(format!("{:.2}", i as f64 / n_labels as f64 * y_max), Style::default().add_modifier(Modifier::BOLD)));
         }
 
         (x_labels, y_labels)
