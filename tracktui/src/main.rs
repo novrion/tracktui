@@ -1,6 +1,6 @@
-use std::fs::File;
-use std::io::Error;
-use csv::Reader;
+use std::{error::Error, fs::File};
+use serde::{Serialize, Deserialize};
+
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
@@ -58,7 +58,7 @@ struct App {
     exit: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct DataSeries {
     name: String,
     data: Vec<(f64, f64)>,
@@ -109,36 +109,85 @@ impl App {
     fn new() -> Self {
         Self {
             mode: ViewMode::Graph,
-            data_series: self.read_csv("data.csv"),
             selected_serie: 0,
             ..Default::default()
         }
     }
-
-    fn read_csv(&mut self, path: String) -> Result<(), Box<dyn, Error>> {
-        let file = File::open(path);
-        let mut rdr = Reader::from_reader(file);
-
+    
+    fn write_csv(&mut self, path: String) -> Result<(), Box<dyn Error>> {
+        let file = File::create(path)?;  // Use create, not open!
+        let mut wtr = csv::Writer::from_writer(file);
+        
+        // Write header
+        wtr.write_record(&["name", "x", "y"])?;
+        
+        // Flatten: write each data point as a separate row
+        for serie in &self.data_series {
+            for &(x, y) in &serie.data {
+                wtr.write_record(&[
+                    serie.name.as_str(),
+                    &x.to_string(),
+                    &y.to_string(),
+                ])?;
+            }
+        }
+        
+        wtr.flush()?;
+        Ok(())
+    }
+    
+    fn read_csv(&mut self, path: String) -> Result<(), Box<dyn Error>> {
+        let file = File::open(path)?;
+        let mut rdr = csv::Reader::from_reader(file);
+        
+        use std::collections::HashMap;
+        let mut series_map: HashMap<String, Vec<(f64, f64)>> = HashMap::new();
+        
+        // Read each row and group by series name
         for result in rdr.records() {
             let record = result?;
-
-            let mut serie = DataSeries::new();
-            serie.name = &record[0];
-            for i in (1..record.len()).step_by(2) {
-                serie.data.push((&record[i], &record[i+1]))
-            }
-
-            self.data_series.push(serie);
+            let name = record.get(0).ok_or("Missing name")?.to_string();
+            let x: f64 = record.get(1).ok_or("Missing x")?.parse()?;
+            let y: f64 = record.get(2).ok_or("Missing y")?.parse()?;
+            
+            series_map.entry(name).or_insert_with(Vec::new).push((x, y));
         }
-
+        
+        // Convert HashMap to Vec<DataSeries>
+        for (name, mut data) in series_map {
+            data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            self.data_series.push(DataSeries { name, data });
+        }
+        
         Ok(())
     }
 
     fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+
+        // Read csv
+        if let Err(e) = self.read_csv("data.csv".to_string()) {
+            self.status_msg = format!("Could not load data.csv: {}", e);
+            self.data_series.push(DataSeries::new());
+        }
+
+        // Add series if none
+        if self.data_series.is_empty() {
+            self.data_series.push(DataSeries::new());
+        }
+        
+        // Main loop
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
         }
+
+        // Write csv
+        if let Err(e) = self.write_csv("data.csv".to_string()) {
+            self.status_msg = format!("Could not write to data.csv (Press any ket to exit): {}", e);
+            terminal.draw(|frame| self.draw(frame))?;
+            event::read()?;
+        }
+
         Ok(())
     }
 
