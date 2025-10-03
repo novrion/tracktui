@@ -4,12 +4,12 @@ use serde::{Serialize, Deserialize};
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
-    layout::{Rect, Constraint, Layout},
+    layout::{Flex, Rect, Constraint, Layout},
     style::{Color, Style, Modifier},
     symbols,
     text::{Span},
     prelude::{Alignment},
-    widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph},
+    widgets::{Clear, Axis, Block, Chart, Dataset, GraphType, Paragraph},
     DefaultTerminal, Frame,
 };
 
@@ -25,7 +25,9 @@ fn main() -> Result<()> {
 enum ViewMode {
     #[default]
     Graph,
-    Data,
+    Table,
+    Menu,
+    Help,
 }
 
 #[derive(Default)]
@@ -44,7 +46,10 @@ enum InputField {
 
 #[derive(Default)]
 struct App {
+    
     mode: ViewMode,
+    clrscr: bool,
+
     data_series: Vec<DataSeries>,
     selected_serie: usize,
 
@@ -62,6 +67,14 @@ struct App {
 struct DataSeries {
     name: String,
     data: Vec<(f64, f64)>,
+}
+
+fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
+    let [area] = Layout::horizontal([horizontal])
+        .flex(Flex::Center)
+        .areas(area);
+    let [area] = Layout::vertical([vertical]).flex(Flex::Center).areas(area);
+    area
 }
 
 impl DataSeries {
@@ -115,10 +128,9 @@ impl App {
     }
     
     fn write_csv(&mut self, path: String) -> Result<(), Box<dyn Error>> {
-        let file = File::create(path)?;  // Use create, not open!
+        let file = File::create(path)?;
         let mut wtr = csv::Writer::from_writer(file);
         
-        // Write header
         wtr.write_record(&["name", "x", "y"])?;
         
         // Flatten: write each data point as a separate row
@@ -143,7 +155,6 @@ impl App {
         use std::collections::HashMap;
         let mut series_map: HashMap<String, Vec<(f64, f64)>> = HashMap::new();
         
-        // Read each row and group by series name
         for result in rdr.records() {
             let record = result?;
             let name = record.get(0).ok_or("Missing name")?.to_string();
@@ -192,11 +203,53 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        if self.clrscr {
+            let background = Block::default().style(Style::default().bg(Color::Reset));
+            frame.render_widget(background, frame.area());
+            self.clrscr = false;
+        }
+
         match self.mode {
             ViewMode::Graph => self.draw_graph_view(frame),
-            _ => {}
+            ViewMode::Menu => self.draw_menu_view(frame),
+            ViewMode::Table => self.draw_table_view(frame),
+            ViewMode::Help => self.draw_help_view(frame),
         }
     }
+
+    fn draw_menu_view(&self, frame: &mut Frame) {
+        let lines = vec![
+            "h\tHelp",
+            "g\tGraph",
+            "t\tTable",
+            "q\tQuit",
+        ];
+
+        let area = center(
+            frame.area(),
+            Constraint::Length(15),
+            Constraint::Length(lines.len() as u16 + 2)
+        );
+
+        let mut text = String::new();
+        for line in lines {
+            text += line;
+            text += "\n";
+        }
+
+        let menu = Paragraph::new(text).block(Block::bordered());
+
+        frame.render_widget(menu, area)
+    }
+
+
+    fn draw_table_view(&mut self, frame: &mut Frame) {
+    }
+
+    fn draw_help_view(&mut self, frame: &mut Frame) {
+
+    }
+
 
     fn draw_graph_view(&mut self, frame: &mut Frame) {
         let chunks = Layout::vertical([
@@ -285,11 +338,42 @@ impl App {
             if key.kind == KeyEventKind::Press {
                 match self.mode {
                     ViewMode::Graph => self.handle_graph_input(key.code),
-                    _ => {}
+                    ViewMode::Table => self.handle_table_input(key.code),
+                    ViewMode::Menu => self.handle_menu_input(key.code),
+                    ViewMode::Help => self.handle_help_input(key.code),
                 }
             }
         }
         Ok(())
+    }
+    
+    fn handle_table_input(&mut self, key: KeyCode) {
+
+    }
+
+    fn handle_help_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') => self.exit = true,
+            KeyCode::Char('g') => self.set_mode(ViewMode::Graph),
+            KeyCode::Char('m') => self.set_mode(ViewMode::Menu),
+            KeyCode::Char('t') => self.set_mode(ViewMode::Table),
+            _ => {}
+        }
+    }
+
+    fn handle_menu_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') => self.exit = true,
+            KeyCode::Char('g') => self.set_mode(ViewMode::Graph),
+            KeyCode::Char('t') => self.set_mode(ViewMode::Table),
+            KeyCode::Char('h') => self.set_mode(ViewMode::Help),
+            _ => {}
+        }
+    }
+
+    fn set_mode(&mut self, mode: ViewMode) {
+        self.clrscr = true;
+        self.mode = mode;
     }
 
     fn handle_graph_input(&mut self, key: KeyCode) {
@@ -298,6 +382,9 @@ impl App {
             InputMode::Normal => {
                 match key {
                     KeyCode::Char('q') => self.exit = true,
+                    KeyCode::Char('h') => self.set_mode(ViewMode::Help),
+                    KeyCode::Char('m') => self.set_mode(ViewMode::Menu),
+                    KeyCode::Char('t') => self.set_mode(ViewMode::Table),
                     KeyCode::Char('i') => {
                         self.input_mode = InputMode::Insert;
                         self.input_field = InputField::X;
