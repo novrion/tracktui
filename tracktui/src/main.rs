@@ -9,7 +9,7 @@ use ratatui::{
     symbols,
     text::{Span, Text, Line},
     prelude::{Alignment},
-    widgets::{Cell, Borders, Row, Padding, Clear, Axis, Block, Chart, Dataset, GraphType, Paragraph, Table, TableState},
+    widgets::{Cell, Row, Padding, Clear, Axis, Block, Chart, Dataset, GraphType, Paragraph, Table, TableState},
     DefaultTerminal, Frame,
 };
 
@@ -236,12 +236,18 @@ impl App {
 
     fn draw_help_view(&mut self, frame: &mut Frame) {
         let lines = vec![
-            Line::from(vec!["System wide".bold().underlined()]),
-            Line::from(""),
             Line::from(vec!["h".bold(), "   Help".into()]),
             Line::from(vec!["m".bold(), "   Menu".into()]),
             Line::from(vec!["g".bold(), "   Graph".into()]),
+            Line::from(vec!["t".bold(), "   Table".into()]),
             Line::from(vec!["q".bold(), "   Quit".into()]),
+            Line::from(""),
+            Line::from(vec!["ENTER".bold(), "   Confirm".into()]),
+            Line::from(vec!["ESC".bold(), "   Deselect".into()]),
+            Line::from(vec!["TAB".bold(), "   Cycle".into()]),
+            Line::from(""),
+            Line::from(vec!["⇆".bold(), "   Cycle l/r".into()]),
+            Line::from(vec!["⇅".bold(), "   Cycle u/d".into()]),
             Line::from(""),
             Line::from(""),
             Line::from(vec!["Graph View".bold().underlined()]),
@@ -294,7 +300,10 @@ impl App {
                 let content = Paragraph::new(text).centered();
                 frame.render_widget(content, chunks[1]);
             }
-            _ => {}
+            false => {
+                let content = Paragraph::new("h: help").centered();
+                frame.render_widget(content, chunks[1]);
+            }
         }
     }
 
@@ -320,11 +329,11 @@ impl App {
         let table = Table::new(rows, widths)
             .header(header)
             .block(Block::bordered()
-                .title("  Table View  ")
+                .title("  Table ⇅ ")
                 .title_alignment(Alignment::Center)
                 .padding(Padding::uniform(2)))
             .column_spacing(1)
-            .highlight_style(
+            .row_highlight_style(
                 Style::default()
                 .bg(Color::White)
                 .fg(Color::Black)
@@ -452,6 +461,14 @@ impl App {
         };
         self.table_state.select(Some(i));
     }
+
+    fn cycle_confirm_idx(&mut self) {
+        self.confirm_idx = match self.confirm_idx {
+            1 => 0,
+            0 => 1,
+            _ => 0
+        }
+    }
     
     fn handle_table_input(&mut self, key: KeyCode) {
         match self.confirm_delete {
@@ -463,27 +480,17 @@ impl App {
                     KeyCode::Char('h') => self.mode = ViewMode::Help,
                     KeyCode::Up | KeyCode::Char('k') => self.select_next(),
                     KeyCode::Down | KeyCode::Char('j') => self.select_previous(), 
-                    KeyCode::Char('d') => { self.confirm_delete = true; },
+                    KeyCode::Char('d') => self.confirm_delete = true,
+                    KeyCode::Esc => self.mode = ViewMode::Menu,
                     _ => {}
                 }
             },
             true => {
                 match key {
-                    KeyCode::Esc => { self.confirm_delete = false; }
-                    KeyCode::Left => {
-                        self.confirm_idx = match self.confirm_idx {
-                            1 => 0,
-                            0 => 1,
-                            _ => 0
-                        }
-                    }
-                    KeyCode::Right => {
-                        self.confirm_idx = match self.confirm_idx {
-                            0 => 1,
-                            1 => 0,
-                            _ => 1
-                        }
-                    }
+                    KeyCode::Esc => self.confirm_delete = false,
+                    KeyCode::Left => self.confirm_idx = 0,
+                    KeyCode::Right => self.confirm_idx = 1,
+                    KeyCode::Tab => self.cycle_confirm_idx(),
                     KeyCode::Enter => {
                         if self.confirm_idx == 0 {
                             if let Some(i) = self.table_state.selected() {
@@ -506,6 +513,7 @@ impl App {
             KeyCode::Char('g') => self.mode = ViewMode::Graph,
             KeyCode::Char('m') => self.mode = ViewMode::Menu,
             KeyCode::Char('t') => self.mode = ViewMode::Table,
+            KeyCode::Esc => self.mode = ViewMode::Menu,
             _ => {}
         }
     }
@@ -543,6 +551,7 @@ impl App {
                         self.input_y.clear();
                         self.status_msg = format!("h: help");
                     }
+                    KeyCode::Esc => self.mode = ViewMode::Menu,
                     _ => {}
                 }
             }
@@ -565,19 +574,19 @@ impl App {
                     }
                     KeyCode::Backspace => {
                         match self.input_field {
-                            InputField::X => { self.input_x.pop(); },
-                            InputField::Y => { self.input_y.pop(); },
-                        }
+                            InputField::X => self.input_x.pop(),
+                            InputField::Y => self.input_y.pop(),
+                        };
                     }
-                    KeyCode::Tab => {
-                        self.cycle_field();
-                    }
+                    KeyCode::Tab => self.cycle_field(),
                     KeyCode::Enter => {
                         self.cycle_field();
                         if !self.input_y.is_empty() && !self.input_x.is_empty() {
                             self.try_insert_point();
                         }
                     }
+                    KeyCode::Left => self.input_field = InputField::X,
+                    KeyCode::Right => self.input_field = InputField::Y,
                     KeyCode::Esc => {
                         self.input_mode = InputMode::Normal;
                         self.input_x.clear();
