@@ -5,11 +5,11 @@ use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
     layout::{Flex, Rect, Constraint, Layout},
-    style::{Color, Style, Modifier},
+    style::{Color, Style, Modifier, Stylize},
     symbols,
-    text::{Span},
+    text::{Span, Text, Line},
     prelude::{Alignment},
-    widgets::{Clear, Axis, Block, Chart, Dataset, GraphType, Paragraph},
+    widgets::{Cell, Borders, Row, Padding, Clear, Axis, Block, Chart, Dataset, GraphType, Paragraph, Table, TableState},
     DefaultTerminal, Frame,
 };
 
@@ -46,19 +46,21 @@ enum InputField {
 
 #[derive(Default)]
 struct App {
-    
     mode: ViewMode,
-    clrscr: bool,
-
     data_series: Vec<DataSeries>,
     selected_serie: usize,
 
-    // Input
+    // Graph View
     input_mode: InputMode,
     input_field: InputField,
     input_x: String,
     input_y: String,
     status_msg: String,
+
+    // Table View
+    table_state: TableState,
+    confirm_delete: bool,
+    confirm_idx: usize,
 
     exit: bool,
 }
@@ -123,6 +125,7 @@ impl App {
         Self {
             mode: ViewMode::Graph,
             selected_serie: 0,
+            status_msg: format!("h: help"),
             ..Default::default()
         }
     }
@@ -203,12 +206,6 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        if self.clrscr {
-            let background = Block::default().style(Style::default().bg(Color::Reset));
-            frame.render_widget(background, frame.area());
-            self.clrscr = false;
-        }
-
         match self.mode {
             ViewMode::Graph => self.draw_graph_view(frame),
             ViewMode::Menu => self.draw_menu_view(frame),
@@ -219,35 +216,122 @@ impl App {
 
     fn draw_menu_view(&self, frame: &mut Frame) {
         let lines = vec![
-            "h\tHelp",
-            "g\tGraph",
-            "t\tTable",
-            "q\tQuit",
+            Line::from(vec!["h".bold(), "   Help".into()]),
+            Line::from(vec!["g".bold(), "   Graph".into()]),
+            Line::from(vec!["t".bold(), "   Table".into()]),
+            Line::from(vec!["q".bold(), "   Quit".into()]),
         ];
 
         let area = center(
             frame.area(),
-            Constraint::Length(15),
-            Constraint::Length(lines.len() as u16 + 2)
+            Constraint::Length(10),
+            Constraint::Length(lines.len() as u16),
         );
 
-        let mut text = String::new();
-        for line in lines {
-            text += line;
-            text += "\n";
-        }
-
-        let menu = Paragraph::new(text).block(Block::bordered());
-
-        frame.render_widget(menu, area)
-    }
-
-
-    fn draw_table_view(&mut self, frame: &mut Frame) {
+        let text = Text::from(lines);
+        let menu = Paragraph::new(text).alignment(Alignment::Center);
+        frame.render_widget(Clear, area);
+        frame.render_widget(menu, area);
     }
 
     fn draw_help_view(&mut self, frame: &mut Frame) {
+        let lines = vec![
+            Line::from(vec!["System wide".bold().underlined()]),
+            Line::from(""),
+            Line::from(vec!["h".bold(), "   Help".into()]),
+            Line::from(vec!["m".bold(), "   Menu".into()]),
+            Line::from(vec!["g".bold(), "   Graph".into()]),
+            Line::from(vec!["q".bold(), "   Quit".into()]),
+            Line::from(""),
+            Line::from(""),
+            Line::from(vec!["Graph View".bold().underlined()]),
+            Line::from(""),
+            Line::from(vec!["i".bold(), "   Insert data".into()]),
+            Line::from(""),
+            Line::from(""),
+            Line::from(vec!["Table View".bold().underlined()]),
+            Line::from(""),
+            Line::from(vec!["d".bold(), "   Delete".into()]),
+        ];
 
+        let area = center(
+            frame.area(),
+            Constraint::Length(30),
+            Constraint::Length(lines.len() as u16 + 2),
+        );
+
+        let text = Text::from(lines);
+        let help = Paragraph::new(text).alignment(Alignment::Center);
+        frame.render_widget(help, area);
+    }
+
+    fn draw_table_view(&mut self, frame: &mut Frame) {
+        let area = center(
+            frame.area(),
+            Constraint::Length(20),
+            Constraint::Percentage(50),
+        );
+
+        let chunks = Layout::vertical(vec![
+            Constraint::Min(5),
+            Constraint::Length(4),
+        ]).split(area);
+
+        self.draw_table(frame, chunks[0]);
+
+        match self.confirm_delete {
+            true => {
+                let text = Text::from(vec![
+                    Line::from(vec!["Delete?".bold()]),
+                    Line::from(vec![
+                        if self.confirm_idx == 0 { "Yes".bold() }
+                        else { "Yes".into() },
+                        "  ".into(),
+                        if self.confirm_idx == 1 { "No".bold() }
+                        else { "No".into() }
+                    ]),
+                ]);
+                let content = Paragraph::new(text).centered();
+                frame.render_widget(content, chunks[1]);
+            }
+            _ => {}
+        }
+    }
+
+    fn draw_table(&mut self, frame: &mut Frame, area: Rect) {
+        let header = Row::new(vec!["X", "Y"])
+            .style(Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD))
+            .bottom_margin(1);
+
+        let rows: Vec<Row> = self.data_series[self.selected_serie].data
+            .iter()
+            .map(|&(x, y)| {
+                Row::new(vec![Cell::from(x.to_string()), Cell::from(y.to_string())])
+            })
+            .collect();
+
+        let widths = [
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+        ];
+
+        let table = Table::new(rows, widths)
+            .header(header)
+            .block(Block::bordered()
+                .title("  Table View  ")
+                .title_alignment(Alignment::Center)
+                .padding(Padding::uniform(2)))
+            .column_spacing(1)
+            .highlight_style(
+                Style::default()
+                .bg(Color::White)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD)
+            );
+
+        frame.render_stateful_widget(table, area, &mut self.table_state);
     }
 
 
@@ -255,7 +339,6 @@ impl App {
         let chunks = Layout::vertical([
             Constraint::Length(3), // Input
             Constraint::Min(10), // Graph
-            Constraint::Length(3), // Instructions
         ]).split(frame.area());
 
         // Input
@@ -263,11 +346,6 @@ impl App {
 
         // Graph
         self.draw_graph(frame, chunks[1]);
-
-        // Instructions
-        let instructions = Paragraph::new("Press 'i' to insert data, <TAB> to cycle between x and y, 'q' to quit")
-            .block(Block::bordered().title(" Instructions "));
-        frame.render_widget(instructions, chunks[2]);
     }
 
     fn draw_input_bar(&mut self, frame: &mut Frame, area: Rect) {
@@ -293,13 +371,13 @@ impl App {
 
         // Status
         let status = Paragraph::new(self.status_msg.clone())
-            .block(Block::bordered().title(" Status "));
+            .block(Block::bordered().title(" Status ").padding(Padding::left(1)));
         frame.render_widget(status, input_chunks[2]);
     }
 
     fn draw_input_box(&mut self, frame: &mut Frame, area: Rect, content: String, title: String, style: Style) {
         let input_box = Paragraph::new(content)
-            .block(Block::bordered().title(title))
+            .block(Block::bordered().title(title).padding(Padding::left(1)))
             .style(style);
             
         frame.render_widget(input_box, area);
@@ -346,17 +424,88 @@ impl App {
         }
         Ok(())
     }
+
+    fn select_previous(&mut self) {
+        let i = match self.table_state.selected() {
+            Some(i) => {
+                if i >= self.data_series[self.selected_serie].data.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state.select(Some(i));
+    }
+
+    fn select_next(&mut self) {
+        let i = match self.table_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.data_series[self.selected_serie].data.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state.select(Some(i));
+    }
     
     fn handle_table_input(&mut self, key: KeyCode) {
-
+        match self.confirm_delete {
+            false => {
+                match key {
+                    KeyCode::Char('q') => self.exit = true,
+                    KeyCode::Char('g') => self.mode = ViewMode::Graph,
+                    KeyCode::Char('m') => self.mode = ViewMode::Menu,
+                    KeyCode::Char('h') => self.mode = ViewMode::Help,
+                    KeyCode::Up | KeyCode::Char('k') => self.select_next(),
+                    KeyCode::Down | KeyCode::Char('j') => self.select_previous(), 
+                    KeyCode::Char('d') => { self.confirm_delete = true; },
+                    _ => {}
+                }
+            },
+            true => {
+                match key {
+                    KeyCode::Esc => { self.confirm_delete = false; }
+                    KeyCode::Left => {
+                        self.confirm_idx = match self.confirm_idx {
+                            1 => 0,
+                            0 => 1,
+                            _ => 0
+                        }
+                    }
+                    KeyCode::Right => {
+                        self.confirm_idx = match self.confirm_idx {
+                            0 => 1,
+                            1 => 0,
+                            _ => 1
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if self.confirm_idx == 0 {
+                            if let Some(i) = self.table_state.selected() {
+                                self.data_series[self.selected_serie].data.remove(i);
+                                self.confirm_delete = false;
+                            }
+                        } else {
+                            self.confirm_delete = false;
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn handle_help_input(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') => self.exit = true,
-            KeyCode::Char('g') => self.set_mode(ViewMode::Graph),
-            KeyCode::Char('m') => self.set_mode(ViewMode::Menu),
-            KeyCode::Char('t') => self.set_mode(ViewMode::Table),
+            KeyCode::Char('g') => self.mode = ViewMode::Graph,
+            KeyCode::Char('m') => self.mode = ViewMode::Menu,
+            KeyCode::Char('t') => self.mode = ViewMode::Table,
             _ => {}
         }
     }
@@ -364,16 +513,18 @@ impl App {
     fn handle_menu_input(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') => self.exit = true,
-            KeyCode::Char('g') => self.set_mode(ViewMode::Graph),
-            KeyCode::Char('t') => self.set_mode(ViewMode::Table),
-            KeyCode::Char('h') => self.set_mode(ViewMode::Help),
+            KeyCode::Char('g') => self.mode = ViewMode::Graph,
+            KeyCode::Char('t') => self.mode = ViewMode::Table,
+            KeyCode::Char('h') => self.mode = ViewMode::Help,
             _ => {}
         }
     }
 
-    fn set_mode(&mut self, mode: ViewMode) {
-        self.clrscr = true;
-        self.mode = mode;
+    fn cycle_field(&mut self) {
+        self.input_field = match self.input_field {
+            InputField::X => { InputField::Y }
+            InputField::Y => { InputField::X }
+        };
     }
 
     fn handle_graph_input(&mut self, key: KeyCode) {
@@ -382,15 +533,15 @@ impl App {
             InputMode::Normal => {
                 match key {
                     KeyCode::Char('q') => self.exit = true,
-                    KeyCode::Char('h') => self.set_mode(ViewMode::Help),
-                    KeyCode::Char('m') => self.set_mode(ViewMode::Menu),
-                    KeyCode::Char('t') => self.set_mode(ViewMode::Table),
+                    KeyCode::Char('h') => self.mode = ViewMode::Help,
+                    KeyCode::Char('m') => self.mode = ViewMode::Menu,
+                    KeyCode::Char('t') => self.mode = ViewMode::Table,
                     KeyCode::Char('i') => {
                         self.input_mode = InputMode::Insert;
                         self.input_field = InputField::X;
                         self.input_x.clear();
                         self.input_y.clear();
-                        self.status_msg.clear();
+                        self.status_msg = format!("h: help");
                     }
                     _ => {}
                 }
@@ -419,19 +570,19 @@ impl App {
                         }
                     }
                     KeyCode::Tab => {
-                        self.input_field = match self.input_field {
-                            InputField::X => { InputField::Y }
-                            InputField::Y => { InputField::X }
-                        };
+                        self.cycle_field();
                     }
                     KeyCode::Enter => {
-                        self.try_insert_point();
+                        self.cycle_field();
+                        if !self.input_y.is_empty() && !self.input_x.is_empty() {
+                            self.try_insert_point();
+                        }
                     }
                     KeyCode::Esc => {
                         self.input_mode = InputMode::Normal;
                         self.input_x.clear();
                         self.input_y.clear();
-                        self.status_msg.clear();
+                        self.status_msg = format!("h: help");
                     }
                     _ => {}
                 }
