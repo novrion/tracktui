@@ -78,16 +78,21 @@ impl DataSeries {
         }
     }
 
-    fn get_bounds(&self) -> (i64, f64) {
+    fn get_bounds(&self) -> (f64, f64, f64, f64) {
         if self.data.is_empty() {
-            return (1, 1.0)
+            return (0.0, 1.0, 0.0, 1.0)
         }
 
+        let x_min = self.data[0].0 as f64;
         let mut x_max = i64::MIN;
         for &(x, _y) in &self.data {
             x_max = x_max.max(x);
         }
-        (x_max, 100.0)
+
+        let y_min = 0.0;
+        let y_max = 100.0;
+
+        (x_min, x_max as f64, y_min, y_max)
     }
 
     fn get_labels(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
@@ -122,6 +127,19 @@ impl DataSeries {
         }
 
         (x_labels, y_labels)
+    }
+
+    fn get_average_loss(&self) -> f64 {
+        if self.data.is_empty() {
+            return 0.0;
+        }
+
+        let mut sum = 0.0;
+        for (_x, y) in &self.data {
+            sum += y;
+        }
+
+        sum / (self.data.len() as f64)
     }
 }
 
@@ -398,6 +416,7 @@ impl App {
         let input_chunks = Layout::horizontal([
             Constraint::Length(12), // Input
             Constraint::Min(20), // Status
+            Constraint::Length(9), // Average Loss
         ]).split(area);
 
         // Input
@@ -411,6 +430,13 @@ impl App {
         let status = Paragraph::new(self.status_msg.clone())
             .block(Block::bordered().title(" Status ").padding(Padding::left(1)));
         frame.render_widget(status, input_chunks[1]);
+
+        // Average Loss
+        let serie = &self.data_series[self.selected_serie];
+        let avg = Paragraph::new(format!("{:.1}%", serie.get_average_loss()))
+            .block(Block::bordered().title(" avg "))
+            .alignment(Alignment::Center);
+        frame.render_widget(avg, input_chunks[2]);
     }
 
     fn draw_input_box(&mut self, frame: &mut Frame, area: Rect, content: String, title: String, style: Style) {
@@ -424,11 +450,7 @@ impl App {
 
     fn draw_graph(&mut self, frame: &mut Frame, area: Rect) {
         let serie = &self.data_series[self.selected_serie];
-        //let x0 = serie.data[0].0;
-        //let x_len = serie.data[serie.data.len()-1].0 - x0;
-        //let adata: Vec<(f64, f64)> = serie.data.iter().map(|&(x, y)| (((x - x0) / x_len) as f64 , y)).collect();
         let data: Vec<(f64, f64)> = serie.data.iter().map(|&(x, y)| (x as f64, y)).collect();
-
         let dataset = Dataset::default()
             .name("")
             .marker(symbols::Marker::Braille)
@@ -436,7 +458,7 @@ impl App {
             .style(Style::default().fg(Color::Cyan))
             .data(&data);
 
-        let (x_max, y_max) = serie.get_bounds();
+        let (x_min, x_max, y_min, y_max) = serie.get_bounds();
         let (x_labels, y_labels) = serie.get_labels();
 
         let title = match serie.name.len() {
@@ -450,11 +472,11 @@ impl App {
                 .title_alignment(Alignment::Center))
             .x_axis(Axis::default()
                 .title("")
-                .bounds([0.0, x_max as f64])
+                .bounds([x_min, x_max as f64])
                 .labels(x_labels))
             .y_axis(Axis::default()
                 .title("")
-                .bounds([0.0, y_max])
+                .bounds([y_min, y_max])
                 .labels(y_labels));
 
         frame.render_widget(chart, area);
