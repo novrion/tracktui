@@ -1,4 +1,5 @@
 use std::{error::Error, fs::File};
+use chrono::{Local, TimeZone, Datelike};
 use serde::{Serialize, Deserialize};
 
 use color_eyre::Result;
@@ -38,13 +39,6 @@ enum InputMode {
 }
 
 #[derive(Default)]
-enum InputField {
-    #[default]
-    X,
-    Y,
-}
-
-#[derive(Default)]
 struct App {
     mode: ViewMode,
     data_series: Vec<DataSeries>,
@@ -52,9 +46,7 @@ struct App {
 
     // Graph View
     input_mode: InputMode,
-    input_field: InputField,
-    input_x: String,
-    input_y: String,
+    input: String,
     status_msg: String,
 
     // Table View
@@ -68,7 +60,7 @@ struct App {
 #[derive(Default, Serialize, Deserialize)]
 struct DataSeries {
     name: String,
-    data: Vec<(f64, f64)>,
+    data: Vec<(i64, f64)>,
 }
 
 fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
@@ -82,38 +74,51 @@ fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
 impl DataSeries {
     fn new() -> Self {
         Self {
-            name: "Graph".to_string(),
             ..Default::default()
         }
     }
 
-    fn get_bounds(&self) -> (f64, f64) {
+    fn get_bounds(&self) -> (i64, f64) {
         if self.data.is_empty() {
-            return (1.0, 1.0)
+            return (1, 1.0)
         }
 
-        let mut x_max = f64::NEG_INFINITY;
-        let mut y_max = f64::NEG_INFINITY;
-        for &(x, y) in &self.data {
+        let mut x_max = i64::MIN;
+        for &(x, _y) in &self.data {
             x_max = x_max.max(x);
-            y_max = y_max.max(y);
         }
-        (x_max, y_max)
+        (x_max, 100.0)
     }
 
     fn get_labels(&self) -> (Vec<Span<'_>>, Vec<Span<'_>>) {
         let mut x_labels = Vec::new();
         let mut y_labels = Vec::new();
-        let (x_max, y_max) = self.get_bounds();
-        let n_labels = std::cmp::min(5, self.data.len());
 
-        if n_labels == 0 {
+        let data_len = self.data.len();
+        if data_len == 0 {
             return (vec![], vec![]);
         }
 
-        for i in 0..=n_labels {
-            x_labels.push(Span::styled(format!("{:.2}", i as f64 / n_labels as f64 * x_max), Style::default().add_modifier(Modifier::BOLD)));
-            y_labels.push(Span::styled(format!("{:.2}", i as f64 / n_labels as f64 * y_max), Style::default().add_modifier(Modifier::BOLD)));
+        // x_labels
+        let mut idxs = vec![0];
+        if data_len > 2 {
+            idxs.push(data_len-1);
+        }
+        for i in idxs {
+            if let Some(dt) = Local.timestamp_opt(self.data[i].0, 0).single() {
+                x_labels.push(
+                    Span::styled(dt.format("%Y-%m-%d").to_string(),
+                        Style::default().add_modifier(Modifier::BOLD)
+                    )
+                );
+            }
+        }
+
+        // y_labels
+        for i in 0..11 {
+            y_labels.push(Span::styled(format!("{}%", i * 10),
+                          Style::default().add_modifier(Modifier::BOLD))
+            );
         }
 
         (x_labels, y_labels)
@@ -123,7 +128,7 @@ impl DataSeries {
 impl App {
     fn new() -> Self {
         Self {
-            mode: ViewMode::Graph,
+            mode: ViewMode::Menu,
             selected_serie: 0,
             status_msg: format!("h: help"),
             ..Default::default()
@@ -156,12 +161,12 @@ impl App {
         let mut rdr = csv::Reader::from_reader(file);
         
         use std::collections::HashMap;
-        let mut series_map: HashMap<String, Vec<(f64, f64)>> = HashMap::new();
+        let mut series_map: HashMap<String, Vec<(i64, f64)>> = HashMap::new();
         
         for result in rdr.records() {
             let record = result?;
             let name = record.get(0).ok_or("Missing name")?.to_string();
-            let x: f64 = record.get(1).ok_or("Missing x")?.parse()?;
+            let x: i64 = record.get(1).ok_or("Missing x")?.parse()?;
             let y: f64 = record.get(2).ok_or("Missing y")?.parse()?;
             
             series_map.entry(name).or_insert_with(Vec::new).push((x, y));
@@ -169,7 +174,7 @@ impl App {
         
         // Convert HashMap to Vec<DataSeries>
         for (name, mut data) in series_map {
-            data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            data.sort_by(|a, b| a.0.cmp(&b.0));
             self.data_series.push(DataSeries { name, data });
         }
         
@@ -215,6 +220,30 @@ impl App {
     }
 
     fn draw_menu_view(&self, frame: &mut Frame) {
+        let chunks = Layout::vertical(vec![
+            Constraint::Percentage(10), // Padding
+            Constraint::Percentage(30),
+            Constraint::Percentage(40),
+        ]).split(frame.area());
+
+        // Title
+        let title_text = "                                                               ▄▄
+███▀▀██▀▀███                      ▀███        ██               ██
+█▀   ██   ▀█                        ██        ██
+     ██    ▀███▄███ ▄█▀██▄  ▄██▀██  ██  ▄██▀██████▀███  ▀███ ▀███
+     ██      ██▀ ▀▀██   ██ ██▀  ██  ██ ▄█     ██    ██    ██   ██
+     ██      ██     ▄█████ ██       ██▄██     ██    ██    ██   ██
+     ██      ██    ██   ██ ██▄    ▄ ██ ▀██▄   ██    ██    ██   ██
+   ▄████▄  ▄████▄  ▀████▀██▄█████▀▄████▄ ██▄▄ ▀████ ▀████▀███▄████▄";
+
+        let title_area = center(
+            chunks[1],
+            Constraint::Length(67),
+            Constraint::Length(10)
+        );
+        let title = Paragraph::new(title_text);
+
+        // Menu
         let lines = vec![
             Line::from(vec!["h".bold(), "   Help".into()]),
             Line::from(vec!["g".bold(), "   Graph".into()]),
@@ -222,16 +251,20 @@ impl App {
             Line::from(vec!["q".bold(), "   Quit".into()]),
         ];
 
-        let area = center(
-            frame.area(),
+        let menu_area = center(
+            chunks[2],
             Constraint::Length(10),
             Constraint::Length(lines.len() as u16),
         );
 
-        let text = Text::from(lines);
-        let menu = Paragraph::new(text).alignment(Alignment::Center);
-        frame.render_widget(Clear, area);
-        frame.render_widget(menu, area);
+        let menu_text = Text::from(lines);
+        let menu = Paragraph::new(menu_text).alignment(Alignment::Center);
+
+        // Render
+        frame.render_widget(Clear, title_area);
+        frame.render_widget(Clear, menu_area);
+        frame.render_widget(title, title_area);
+        frame.render_widget(menu, menu_area);
     }
 
     fn draw_help_view(&mut self, frame: &mut Frame) {
@@ -243,8 +276,8 @@ impl App {
             Line::from(vec!["q".bold(), "   Quit".into()]),
             Line::from(""),
             Line::from(vec!["ENTER".bold(), "   Confirm".into()]),
-            Line::from(vec!["ESC".bold(), "   Deselect".into()]),
-            Line::from(vec!["TAB".bold(), "   Cycle".into()]),
+            Line::from(vec!["ESC  ".bold(), "   Deselect".into()]),
+            Line::from(vec!["TAB  ".bold(), "   Cycle".into()]),
             Line::from(""),
             Line::from(vec!["⇆".bold(), "   Cycle l/r".into()]),
             Line::from(vec!["⇅".bold(), "   Cycle u/d".into()]),
@@ -262,20 +295,20 @@ impl App {
 
         let area = center(
             frame.area(),
-            Constraint::Length(30),
+            Constraint::Length(16),
             Constraint::Length(lines.len() as u16 + 2),
         );
 
         let text = Text::from(lines);
-        let help = Paragraph::new(text).alignment(Alignment::Center);
+        let help = Paragraph::new(text);
         frame.render_widget(help, area);
     }
 
     fn draw_table_view(&mut self, frame: &mut Frame) {
         let area = center(
             frame.area(),
-            Constraint::Length(20),
-            Constraint::Percentage(50),
+            Constraint::Length(35),
+            Constraint::Percentage(70),
         );
 
         let chunks = Layout::vertical(vec![
@@ -308,7 +341,7 @@ impl App {
     }
 
     fn draw_table(&mut self, frame: &mut Frame, area: Rect) {
-        let header = Row::new(vec!["X", "Y"])
+        let header = Row::new(vec!["Date", "Loss"])
             .style(Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD))
@@ -317,7 +350,11 @@ impl App {
         let rows: Vec<Row> = self.data_series[self.selected_serie].data
             .iter()
             .map(|&(x, y)| {
-                Row::new(vec![Cell::from(x.to_string()), Cell::from(y.to_string())])
+                let mut x_str = x.to_string();
+                if let Some(dt) = Local.timestamp_opt(x, 0).single() {
+                    x_str = dt.format("%Y-%m-%d").to_string();
+                }
+                Row::new(vec![Cell::from(x_str), Cell::from(format!("{}%", y))])
             })
             .collect();
 
@@ -359,34 +396,27 @@ impl App {
 
     fn draw_input_bar(&mut self, frame: &mut Frame, area: Rect) {
         let input_chunks = Layout::horizontal([
-            Constraint::Length(8), // X
-            Constraint::Length(8), // Y
+            Constraint::Length(12), // Input
             Constraint::Min(20), // Status
         ]).split(area);
 
-        // X
-        let x_style = match (&self.input_mode, &self.input_field) {
-            (InputMode::Insert, InputField::X) => Style::default().fg(Color::Yellow),
+        // Input
+        let input_style = match &self.input_mode {
+            InputMode::Insert => Style::default().fg(Color::Yellow),
             _ => Style::default(),
         };
-        self.draw_input_box(frame, input_chunks[0], self.input_x.clone(), format!(" X "), x_style);
-
-        // Y
-        let y_style = match (&self.input_mode, &self.input_field) {
-            (InputMode::Insert, InputField::Y) => Style::default().fg(Color::Yellow),
-            _ => Style::default(),
-        };
-        self.draw_input_box(frame, input_chunks[1], self.input_y.clone(), format!(" Y "), y_style);
+        self.draw_input_box(frame, input_chunks[0], self.input.clone(), format!(" Input "), input_style);
 
         // Status
         let status = Paragraph::new(self.status_msg.clone())
             .block(Block::bordered().title(" Status ").padding(Padding::left(1)));
-        frame.render_widget(status, input_chunks[2]);
+        frame.render_widget(status, input_chunks[1]);
     }
 
     fn draw_input_box(&mut self, frame: &mut Frame, area: Rect, content: String, title: String, style: Style) {
         let input_box = Paragraph::new(content)
             .block(Block::bordered().title(title).padding(Padding::left(1)))
+            .alignment(Alignment::Center)
             .style(style);
             
         frame.render_widget(input_box, area);
@@ -394,26 +424,36 @@ impl App {
 
     fn draw_graph(&mut self, frame: &mut Frame, area: Rect) {
         let serie = &self.data_series[self.selected_serie];
+        //let x0 = serie.data[0].0;
+        //let x_len = serie.data[serie.data.len()-1].0 - x0;
+        //let adata: Vec<(f64, f64)> = serie.data.iter().map(|&(x, y)| (((x - x0) / x_len) as f64 , y)).collect();
+        let data: Vec<(f64, f64)> = serie.data.iter().map(|&(x, y)| (x as f64, y)).collect();
+
         let dataset = Dataset::default()
             .name("")
             .marker(symbols::Marker::Braille)
             .graph_type(GraphType::Line)
             .style(Style::default().fg(Color::Cyan))
-            .data(&serie.data);
+            .data(&data);
 
         let (x_max, y_max) = serie.get_bounds();
         let (x_labels, y_labels) = serie.get_labels();
 
+        let title = match serie.name.len() {
+            0 => "".to_string(),
+            _ => format!(" {} ", serie.name)
+        };
+
         let chart = Chart::new(vec![dataset])
             .block(Block::bordered()
-                .title(format!(" {} ", serie.name))
+                .title(title)
                 .title_alignment(Alignment::Center))
             .x_axis(Axis::default()
-                .title("X")
-                .bounds([0.0, x_max])
+                .title("")
+                .bounds([0.0, x_max as f64])
                 .labels(x_labels))
             .y_axis(Axis::default()
-                .title("Y")
+                .title("")
                 .bounds([0.0, y_max])
                 .labels(y_labels));
 
@@ -478,9 +518,13 @@ impl App {
                     KeyCode::Char('g') => self.mode = ViewMode::Graph,
                     KeyCode::Char('m') => self.mode = ViewMode::Menu,
                     KeyCode::Char('h') => self.mode = ViewMode::Help,
-                    KeyCode::Up | KeyCode::Char('k') => self.select_next(),
-                    KeyCode::Down | KeyCode::Char('j') => self.select_previous(), 
-                    KeyCode::Char('d') => self.confirm_delete = true,
+                    KeyCode::Up | KeyCode::Char('k') | KeyCode::Tab => self.select_next(),
+                    KeyCode::Down | KeyCode::Char('j') => self.select_previous(),
+                    KeyCode::Char('d') => {
+                        if self.table_state.selected().is_some() {
+                            self.confirm_delete = true;
+                        }
+                    },
                     KeyCode::Esc => self.mode = ViewMode::Menu,
                     _ => {}
                 }
@@ -528,13 +572,6 @@ impl App {
         }
     }
 
-    fn cycle_field(&mut self) {
-        self.input_field = match self.input_field {
-            InputField::X => { InputField::Y }
-            InputField::Y => { InputField::X }
-        };
-    }
-
     fn handle_graph_input(&mut self, key: KeyCode) {
         match self.input_mode {
 
@@ -546,9 +583,7 @@ impl App {
                     KeyCode::Char('t') => self.mode = ViewMode::Table,
                     KeyCode::Char('i') => {
                         self.input_mode = InputMode::Insert;
-                        self.input_field = InputField::X;
-                        self.input_x.clear();
-                        self.input_y.clear();
+                        self.input.clear();
                         self.status_msg = format!("h: help");
                     }
                     KeyCode::Esc => self.mode = ViewMode::Menu,
@@ -559,38 +594,21 @@ impl App {
             InputMode::Insert => {
                 match key {
                     KeyCode::Char(c) if c.is_ascii_digit() || c == '.' || c == '-'=> {
-                        match self.input_field {
-                            InputField::X => {
-                                if self.input_x.len() < 5 {
-                                    self.input_x.push(c);
-                                }
-                            },
-                            InputField::Y => {
-                                if self.input_y.len() < 5 {
-                                    self.input_y.push(c);
-                                }
-                            },
+                        if self.input.len() < 5 {
+                            self.input.push(c);
                         }
                     }
                     KeyCode::Backspace => {
-                        match self.input_field {
-                            InputField::X => self.input_x.pop(),
-                            InputField::Y => self.input_y.pop(),
-                        };
+                        self.input.pop();
                     }
-                    KeyCode::Tab => self.cycle_field(),
                     KeyCode::Enter => {
-                        self.cycle_field();
-                        if !self.input_y.is_empty() && !self.input_x.is_empty() {
+                        if !self.input.is_empty() {
                             self.try_insert_point();
                         }
                     }
-                    KeyCode::Left => self.input_field = InputField::X,
-                    KeyCode::Right => self.input_field = InputField::Y,
                     KeyCode::Esc => {
                         self.input_mode = InputMode::Normal;
-                        self.input_x.clear();
-                        self.input_y.clear();
+                        self.input.clear();
                         self.status_msg = format!("h: help");
                     }
                     _ => {}
@@ -600,19 +618,32 @@ impl App {
     }
 
     fn try_insert_point(&mut self) {
-        match (self.input_x.parse::<f64>(), self.input_y.parse::<f64>()) {
-            (Ok(x), Ok(y)) => {
-                let serie = &mut self.data_series[self.selected_serie];
-                serie.data.push((x, y));
-                serie.data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        match self.input.parse::<f64>() {
+            Ok(val) => {
+                match val {
+                    0.0..=100.0 => {
+                        let serie = &mut self.data_series[self.selected_serie];
 
-                self.input_mode = InputMode::Normal;
-                self.input_x.clear();
-                self.input_y.clear();
-                self.status_msg = format!("Inserted point ({:.2}, {:.2})", x, y);
+                        let now = Local::now();
+                        let today = Local.with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0).unwrap();
+                        let timestamp = today.timestamp();
+
+                        serie.data.push((timestamp, val));
+                        serie.data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+                        self.input_mode = InputMode::Normal;
+                        self.input.clear();
+                        self.status_msg = format!("Inserted point ({}, {}%)", today.format("%Y-%m-%d"), val);
+                    }
+                    _ => {
+                        self.input_mode = InputMode::Normal;
+                        self.input.clear();
+                        self.status_msg = format!("Loss must be between 0 and 100%")
+                    }
+                }
             }
             _ => {
-                self.status_msg = "Error: enter valid numbers for x and y".to_string();
+                self.status_msg = "Error: enter a valid number between 0 and 100".to_string();
             }
         }
     }
