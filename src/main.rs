@@ -647,7 +647,7 @@ impl App {
                         let serie = &mut self.data_series[self.selected_serie];
 
                         let now = Local::now();
-                        let today = Local.with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0).unwrap();
+                        let today = Local.with_ymd_and_hms(now.year(), now.month(), now.day() - 1, 0, 0, 0).unwrap();
                         let timestamp = today.timestamp();
 
                         serie.data.push((timestamp, val));
