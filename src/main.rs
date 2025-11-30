@@ -135,11 +135,16 @@ impl DataSeries {
         }
 
         let mut sum = 0.0;
-        for (_x, y) in &self.data {
-            sum += y;
+        let mut count = 0;
+        for i in (0..self.data.len()).rev() {
+            sum += self.data[i].1;
+            count += 1;
+            if count >= 20 {
+                break;
+            }
         }
 
-        sum / (self.data.len() as f64)
+        sum / count as f64
     }
 }
 
@@ -416,7 +421,7 @@ impl App {
         let input_chunks = Layout::horizontal([
             Constraint::Length(12), // Input
             Constraint::Min(20), // Status
-            Constraint::Length(9), // Average Loss
+            Constraint::Length(12), // Average Loss
         ]).split(area);
 
         // Input
@@ -434,7 +439,7 @@ impl App {
         // Average Loss
         let serie = &self.data_series[self.selected_serie];
         let avg = Paragraph::new(format!("{:.1}%", serie.get_average_loss()))
-            .block(Block::bordered().title(" avg "))
+            .block(Block::bordered().title(" 20d avg "))
             .alignment(Alignment::Center);
         frame.render_widget(avg, input_chunks[2]);
     }
