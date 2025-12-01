@@ -1,5 +1,5 @@
 use std::{error::Error, fs::File};
-use chrono::{Local, TimeZone, Datelike};
+use chrono::{Local, TimeZone};
 use serde::{Serialize, Deserialize};
 
 use color_eyre::Result;
@@ -651,16 +651,15 @@ impl App {
                     0.0..=100.0 => {
                         let serie = &mut self.data_series[self.selected_serie];
 
-                        let now = Local::now();
-                        let today = Local.with_ymd_and_hms(now.year(), now.month(), now.day() - 1, 0, 0, 0).unwrap();
-                        let timestamp = today.timestamp();
+                        let yesterday = Local::now().date_naive() - chrono::Duration::days(1);
+                        let timestamp = yesterday.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).unwrap().timestamp();
 
                         serie.data.push((timestamp, val));
                         serie.data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
                         self.input_mode = InputMode::Normal;
                         self.input.clear();
-                        self.status_msg = format!("Inserted point ({}, {}%)", today.format("%Y-%m-%d"), val);
+                        self.status_msg = format!("Inserted point ({}, {}%)", yesterday.format("%Y-%m-%d"), val);
                     }
                     _ => {
                         self.input_mode = InputMode::Normal;
