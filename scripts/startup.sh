@@ -1,7 +1,7 @@
 #!/bin/bash
 
-COMMAND_TO_RUN="./tracktui"
-STATE_FILE="$HOME/.tracktui_state"
+COMMAND_TO_RUN="./bin/tracktui startup"
+STATE_FILE="./.last_run"
 TODAY=$(date +%Y-%m-%d)
 
 # Read state
